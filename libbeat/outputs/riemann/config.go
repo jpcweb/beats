@@ -20,8 +20,8 @@ package riemann
 import "github.com/elastic/beats/v7/libbeat/outputs/codec"
 
 type Config struct {
-	Codec codec.Config `config:"codec"`
-
+	Codec     codec.Config `config:"codec"`
+	Hosts     []string     `config:"hosts"`
 	BatchSize int
 }
 

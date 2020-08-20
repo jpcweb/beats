@@ -46,22 +46,22 @@ type riemann struct {
 	writer   *bufio.Writer
 	codec    codec.Codec
 	index    string
-	hosts    []string
+	config   *Config
 }
 
-type OsData struct {
-	Family string
-	Kernel string
+type osData struct {
+	family string
+	kernel string
 }
 
-type RiemannData struct {
-	Timestamp string
-	Hostname  string
-	Ip        string
-	Os        OsData
-	Message   string
-	Username  string
-	Action    string
+type riemannData struct {
+	timestamp string
+	hostname  string
+	ip        string
+	os        osData
+	message   string
+	username  string
+	action    string
 }
 
 type consoleEvent struct {
@@ -104,8 +104,10 @@ func makeRiemann(
 		return outputs.Fail(err)
 	}
 
+	config.Hosts = hosts
+
 	index := beat.Beat
-	c, err := newRiemann(index, observer, enc, hosts)
+	c, err := newRiemann(index, observer, enc, &config)
 	if err != nil {
 		return outputs.Fail(fmt.Errorf("riemann output initialization failed with: %v", err))
 	}
@@ -121,8 +123,8 @@ func makeRiemann(
 	return outputs.Success(config.BatchSize, 0, c)
 }
 
-func newRiemann(index string, observer outputs.Observer, codec codec.Codec, hosts []string) (*riemann, error) {
-	c := &riemann{log: logp.NewLogger("riemann"), out: os.Stdout, codec: codec, observer: observer, index: index, hosts: hosts}
+func newRiemann(index string, observer outputs.Observer, codec codec.Codec, config *Config) (*riemann, error) {
+	c := &riemann{log: logp.NewLogger("riemann"), out: os.Stdout, codec: codec, observer: observer, index: index, config: config}
 	c.writer = bufio.NewWriterSize(c.out, 8*1024)
 	return c, nil
 }
@@ -158,26 +160,25 @@ func (c *riemann) publishEvent(event *publisher.Event) bool {
 	//fmt.Println(x_fields,"\n")
 
 	x_jsonParsed, _ := gabs.ParseJSON(jsonEncoding.RawMessage(fmt.Sprintf("%v", x_fields)))
-	x_os_data := OsData{
-		Family: x_jsonParsed.Path("host.os.family").String(),
-		Kernel: x_jsonParsed.Path("host.os.kernel").String(),
+	x_os_data := osData{
+		family: x_jsonParsed.Path("host.os.family").String(),
+		kernel: x_jsonParsed.Path("host.os.kernel").String(),
 	}
-	x_riemann_data := RiemannData{
-		Timestamp: event.Content.Timestamp.String(),
-		Hostname:  x_jsonParsed.Path("host.hostname").String(),
-		Os:        x_os_data,
-		Message:   x_jsonParsed.Path("message").String(),
-		Username:  x_jsonParsed.Path("winlog.user.name").String(),
-		Action:    x_jsonParsed.Path("event.action").String(),
+	x_riemann_data := riemannData{
+		timestamp: event.Content.Timestamp.String(),
+		hostname:  x_jsonParsed.Path("host.hostname").String(),
+		os:        x_os_data,
+		message:   x_jsonParsed.Path("message").String(),
+		username:  x_jsonParsed.Path("winlog.user.name").String(),
+		action:    x_jsonParsed.Path("event.action").String(),
 	}
 	x_riemann_data.sendItToRiemann(c)
-	/*fmt.Println(x_jsonParsed.Path("host.hostname").String())*/
 
 	return true
 }
 
-func (r *RiemannData) sendItToRiemann(c *riemann) {
-	for _, host := range c.hosts {
+func (r *riemannData) sendItToRiemann(c *riemann) {
+	for _, host := range c.config.Hosts {
 		conn := riemanngo.NewTCPClient(host, 5*time.Second)
 		err := conn.Connect()
 		if err != nil {
@@ -185,11 +186,11 @@ func (r *RiemannData) sendItToRiemann(c *riemann) {
 		}
 		_, err = riemanngo.SendEvent(conn, &riemanngo.Event{
 			Service:     "Windows",
-			Host:        r.Hostname,
+			Host:        r.hostname,
 			State:       "ok",
 			Metric:      100,
-			Description: r.Message,
-			Tags:        []string{r.Username},
+			Description: r.message,
+			Tags:        []string{r.username},
 		})
 		if err != nil {
 			log.Fatal(err)
